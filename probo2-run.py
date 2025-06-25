@@ -310,12 +310,20 @@ def run_experiment(cfg: DictConfig) -> None:
         print("Config is valid. Start running experiment.")
     # Run experiment based on task or config
     # Check if the cfg.task string contains the prefix SE or EE
-    if cfg.task.startswith("SE") or cfg.task.startswith("EE"):
-        run_solver_static_enumeration(cfg)
-    # Check if the cfg.task string contains the prefix DC or DS
-    elif cfg.task.startswith("DC") or cfg.task.startswith("DS"):
-        run_solver_static_accaptance(cfg)
 
+    if utils.solver_supports_task(cfg.solver.path, cfg.task):
+
+        if cfg.task.startswith("SE") or cfg.task.startswith("EE"):
+            run_solver_static_enumeration(cfg)
+        # Check if the cfg.task string contains the prefix DC or DS
+        elif cfg.task.startswith("DC") or cfg.task.startswith("DS"):
+            run_solver_static_accaptance(cfg)
+    else:
+        print("\n" + "="*60)
+        print(f"⚠️  WARNING: Solver '{cfg.solver.path}' does NOT support task '{cfg.task}'.")
+        print("Aborting experiment.")
+        print("="*60 + "\n")
+        return
 
 if __name__ == "__main__":
     run_experiment()

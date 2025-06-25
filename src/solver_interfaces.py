@@ -45,9 +45,19 @@ def get_legacy_interface_static(config: DictConfig):
     Returns:
         list: A list of command parameters to be used for the solver interface.
     """
-    cmd_params = get_iccma23_interface_call_static(config)
+    # cmd_params = get_iccma23_interface_call_static(config)
 
-    cmd_params.extend(['-fo',config.solver.format])
+    # cmd_params.extend(['-fo',config.solver.format])
+    cmd_params = list()
+    solver_path = config.solver.path
+    task = config.task
+    if solver_path.endswith('.sh'):
+        cmd_params.append('bash')
+    elif solver_path.endswith('.py'):
+        cmd_params.append('python')
+
+
+    cmd_params.extend([solver_path, "-p", task,"-fo", config.solver.format, "-f", ''])
 
     # Check if there are any additional paramters specified in cfg.solver.arguments
     if 'argument' in config.solver:

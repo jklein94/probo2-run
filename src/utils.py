@@ -13,6 +13,59 @@ import tabulate
 import pandas as pd
 import psutil
 
+def solver_supports_task(solver_path: str, task: str) -> bool:
+    """
+    Calls the solver with the "--problems" argument and checks if the output contains
+    the specified task string. The solver can be an executable binary, a shell script (.sh),
+    or a Python script (.py).
+
+    Args:
+        solver_path (str): The full path to the solver.
+        task (str): The task string to search for in the solver's output.
+
+    Returns:
+        bool: True if the task string is found in the output, False otherwise.
+    """
+    # Determine the command based on the file extension
+    _, ext = os.path.splitext(solver_path)
+    ext = ext.lower()
+    problems_propmpt = "--problems"
+    #problems_propmpt = "--problem" # needed for argmat solvers from ICCMA17
+
+    if ext == ".py":
+        # Use the Python interpreter to run the script
+        command = ["python", solver_path, problems_propmpt]
+    elif ext == ".sh":
+        # Use bash to run shell scripts
+        command = ["bash", solver_path, problems_propmpt]
+    else:
+        # Assume it's an executable binary
+        command = [solver_path, problems_propmpt]
+
+    # Get the parent directory of the solver
+    parent_dir = os.path.dirname(solver_path)
+
+    try:
+        # Run the solver command in the parent directory and capture output
+        result = subprocess.run(
+            command,
+            cwd=parent_dir,        # <-- Change working directory
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        # Check if the task string is present in the output
+        return task in result.stdout
+
+    except subprocess.CalledProcessError as e:
+        # The solver call failed; log the error and return False
+        print(f"Error running solver: {e}")
+        return False
+    except FileNotFoundError as e:
+        # The solver file was not found or is not accessible
+        print(f"Solver not found: {e}")
+        return False
+
 def print_df_by_groups(df: pd.DataFrame, grouping,tablefmt='fancy_grid'):
     df.groupby(grouping).apply(lambda _df: print(tabulate.tabulate(_df,headers='keys',tablefmt=tablefmt,showindex=False)))
 
@@ -614,7 +667,10 @@ def validate_solver_output_enumeration_task(cfg: DictConfig, result: Dict[str, a
         else:
             return False
     else:
-        return True
+        if  result['timed_out'] or result['exit_with_error']:
+            return False
+        else:
+            return True
 def validate_solver_output_accaptance_task(cfg: DictConfig, result: Dict[str, any]) -> bool:
     """
     Check the solver output and update the result dictionary with the validity of the solver output.
@@ -635,7 +691,10 @@ def validate_solver_output_accaptance_task(cfg: DictConfig, result: Dict[str, an
         else:
             return False
     else:
-        return True
+        if  result['timed_out'] or result['exit_with_error']:
+            return False
+        else:
+            return True
 
 
 def dump_configs(cfg):

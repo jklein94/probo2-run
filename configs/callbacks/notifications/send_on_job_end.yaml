@@ -1,0 +1,10 @@
+
+# @package _global_
+
+hydra:
+  callbacks:
+    notify_on_job_end:
+      _target_: src.callbacks.notification_callbacks.SendNotificationOnJobEnd
+
+
+
