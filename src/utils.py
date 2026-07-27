@@ -421,7 +421,7 @@ def save_instance_to_query_arg_mapping(instances: List[str], query_argument_inst
         if not os.path.exists(mapping_file_path):
             try:
                 instance_to_query_arg_mapping = generate_instance_to_query_arg_mapping(
-                    instances, query_argument_instances, cfg.benchmark.query_arg_format)
+                    instances, query_argument_instances,cfg.benchmark.format[0], cfg.benchmark.query_arg_format)
             except ValueError as e:
                 print(e)
                 print("Please make sure the query argument files are present for all instances.")
@@ -429,6 +429,7 @@ def save_instance_to_query_arg_mapping(instances: List[str], query_argument_inst
 
             with open(mapping_file_path, 'w') as f:
                 f.write(OmegaConf.to_yaml(instance_to_query_arg_mapping))
+                print(f"Mapping file created at {mapping_file_path}.")
         else:
             print(f"Mapping file already exists at {mapping_file_path}.")
 
@@ -442,7 +443,7 @@ def strip_extension(filename: str, extension: str) -> str:
         return filename[: -len(extension) - 1] # Remove the extension and the dot
     return os.path.splitext(filename)[0]
 
-def generate_instance_to_query_arg_mapping(instances: List[str], query_argument_instances: List[str], extension: str) -> Dict[str, str]:
+def generate_instance_to_query_arg_mapping(instances: List[str], query_argument_instances: List[str], extension_instance: str, extension_query_arg: str) -> Dict[str, str]:
     """
     Maps instance names (without extension) to the content of corresponding query argument instances,
     splitting query_argument_instances on the specified extension.
@@ -452,9 +453,9 @@ def generate_instance_to_query_arg_mapping(instances: List[str], query_argument_
     :param extension: Extension to split query argument instances on (e.g., '.arg').
     :return: Dictionary mapping instance names to query argument contents.
     """
-    instance_names = {strip_extension(os.path.basename(path), extension): path for path in instances}
-    query_arg_names = {strip_extension(os.path.basename(path), extension): path for path in query_argument_instances}
-
+    instance_names = {strip_extension(os.path.basename(path), extension_instance): path for path in instances}
+    query_arg_names = {strip_extension(os.path.basename(path), extension_query_arg): path for path in query_argument_instances}
+    
     if set(instance_names.keys()) != set(query_arg_names.keys()):
             # Compute mismatched subsets
         instance_only = set(instance_names.keys()) - set(query_arg_names.keys())
@@ -471,7 +472,7 @@ def generate_instance_to_query_arg_mapping(instances: List[str], query_argument_
             print("Query arguments not found in instance files:")
             for key in query_only:
                 print(f"  - {key}")
-
+   
         raise ValueError("Mismatch between instance files and query argument files.")
 
     mapping = {}
@@ -593,6 +594,8 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
         if "SE-" in task:
             # Expect something like "[...]" or possibly "[]" if empty
             # Minimal check: must start with "[" and end with "]"
+            if output == "NO":
+                is_valid = True
             if not (output.startswith("[") and output.endswith("]")):
                 is_valid = False
 
@@ -613,25 +616,28 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
     elif interface.lower() == "i23":
         # ICCMA23 checks
         if "SE-" in task:
-            # "NO" if no solution, or "_w " followed by integers if there is a solution
-            if output == "NO":
+            normalized_output = output.strip()
+
+            # "NO" if no solution
+            if normalized_output == "NO":
                 is_valid = True
-            elif output.startswith("w "):
-                # Check the parts after splitting on whitespace
-                parts = output.split()
-                if parts[0] != "w":
+            else:
+                parts = normalized_output.split()
+
+                # Accept:
+                #   w          -> empty extension
+                #   w 1 2 3    -> extension containing integers
+                if not parts or parts[0] != "w":
                     is_valid = False
                 else:
-                    # Ensure all subsequent parts are valid integers
-                    for p in parts[1:]:
-                        try:
-                            int(p)
-                        except ValueError:
-                            is_valid = False
-                            break
-            else:
-                # Not matching "NO" or "w N1 N2..."
-                is_valid = False
+                    try:
+                        # For an empty extension, parts[1:] is empty and valid.
+                        for part in parts[1:]:
+                            int(part)
+
+                        is_valid = True
+                    except ValueError:
+                        is_valid = False
 
         elif  "EE-" in task:
             # Not specified in the problem description for ICCMA23
