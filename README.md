@@ -125,5 +125,16 @@ Next, the `task` parameter defines the tasks to be solved during the experiment.
 
 During the experiment's execution, each specified solver will be run on the benchmarks, attempting to solve the given tasks. All combinations of solvers, benchmarks, and tasks will be processed.
 
+#### Restricting tasks per solver (optional)
+
+By default every solver in the sweep runs against every swept task. To restrict a specific solver to a subset of tasks, add `solver_task_mapping` to your experiment file, keyed by the solver's `name` field (not the config-group path used under `hydra.sweeper.params.solver`):
+
+```yaml
+solver_task_mapping:
+  MySolver_1: [DS-PR]
+```
+
+Solvers not listed as a key are unaffected and continue to run on all swept tasks. Excluded combinations are skipped at runtime with a console message — no result row or `.out` file is produced for them.
+
 
 

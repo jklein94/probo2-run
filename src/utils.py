@@ -564,7 +564,7 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
     1) ICCMA23
        - SE task:
            • If there is a solution: a single line beginning with "_w" followed by space-separated integers
-             e.g. "_w 1 2 4 5"
+             e.g. "w 1 2 4 5"
            • If there is no solution: the single line "NO"
        - EE task:
            • Not specified in the question. You may adapt to your needs.
@@ -613,7 +613,7 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
     elif interface.lower() == "i23":
         # ICCMA23 checks
         if "SE-" in task:
-            # "NO" if no solution, or "_w " followed by integers if there is a solution
+            # "NO" if no solution, or "w " followed by integers if there is a solution
             if output == "NO":
                 is_valid = True
             elif output.startswith("w "):

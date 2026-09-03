@@ -177,3 +177,28 @@ results/
 
 cuda-keyring_1.0-1_all.deb
 nodesource_setup.sh
+
+# ----- Project-specific: personal run configs & generated run artifacts -----
+# Only the default/example configs shipped with the repo are tracked; solver,
+# benchmark, and experiment configs a user creates for their own runs are ignored.
+
+# configs/solver/ and configs/experiments/: only top-level example *.yaml files are
+# tracked (e.g. configs/solver/MySolver.yaml, configs/experiments/*_example.yaml).
+# Subdirectories (e.g. I19/, I21/, I23/, Missing*/) hold user-specific run configs.
+configs/solver/*/
+configs/experiments/*/
+
+# configs/benchmark/: only the example is tracked; all other benchmark configs
+# (pointing at a user's own benchmark paths) are ignored.
+configs/benchmark/*.yaml
+!configs/benchmark/MyBenchmark.yaml
+
+# Unused/personal scratch config
+configs/watchdog.yaml
+
+# Generated run artifacts (Hydra outputs, run logs, solver stdout dumps)
+*.out
+logs/
+log_runs/
+multirun/
+outputs/

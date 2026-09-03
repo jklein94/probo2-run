@@ -104,6 +104,10 @@ def run_solver_static_accaptance(cfg: DictConfig) -> None:
 
     utils.write_result_file_to_index(result_file_path, index_file=cfg.result_index_file)
 
+    # Instances already logged in result_file_path are skipped so re-running a job
+    # does not append duplicate rows for the same result_path
+    completed_result_paths = utils.get_completed_result_paths(result_file_path)
+
     if cfg.run_subset is not False:
         instances = utils.get_instances_subset(instances, cfg)
 
@@ -127,6 +131,9 @@ def run_solver_static_accaptance(cfg: DictConfig) -> None:
                         output_file_name += f"_{param}_{cfg[param]}"
 
         current_output_file_path = os.path.join(output_root_dir, output_file_name)
+
+        if current_output_file_path in completed_result_paths:
+            continue
 
         result = utils.run_solver_with_timeout(
             final_solver_interface_command,
@@ -226,6 +233,10 @@ def run_solver_static_enumeration(cfg: DictConfig) -> None:
 
     utils.write_result_file_to_index(result_file_path, index_file=cfg.result_index_file)
 
+    # Instances already logged in result_file_path are skipped so re-running a job
+    # does not append duplicate rows for the same result_path
+    completed_result_paths = utils.get_completed_result_paths(result_file_path)
+
     if cfg.run_subset is not False:
         instances = utils.get_instances_subset(instances, cfg)
 
@@ -247,7 +258,8 @@ def run_solver_static_enumeration(cfg: DictConfig) -> None:
 
         current_output_file_path = os.path.join(output_root_dir, output_file_name)
 
-        # check if the current_output_file_path already exists
+        if current_output_file_path in completed_result_paths:
+            continue
 
         result = utils.run_solver_with_timeout(
             solver_interface_command,
@@ -310,6 +322,12 @@ def run_experiment(cfg: DictConfig) -> None:
         print("Config is valid. Start running experiment.")
     # Run experiment based on task or config
     # Check if the cfg.task string contains the prefix SE or EE
+
+    if not utils.task_allowed_for_solver(cfg, cfg.task):
+        print("\n" + "-"*60)
+        print(f"Skipping: task '{cfg.task}' is not in the allowed task list for solver '{cfg.solver.name}' (solver_task_mapping).")
+        print("-"*60 + "\n")
+        return
 
     if utils.solver_supports_task(cfg.solver.path, cfg.task):
 
