@@ -30,7 +30,6 @@ class All(Callback):
         )
 
         print(stats)
-        print(stats)
 
 
 class MeanRuntime(Callback):

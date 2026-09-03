@@ -68,15 +68,26 @@ def validate_solver_results(df: pd.DataFrame, config: DictConfig):
                         file.write(row["instance"] + "\n")
                 else:
                     # get the reference solution for the instance
-                    reference_solution = reference_solutions_df[
+                    matching_reference = reference_solutions_df[
                         reference_solutions_df["instance"] == row["raw_instance_name"]
-                    ]["solution"].iloc[0]
+                    ]["solution"]
+                    if matching_reference.empty:
+                        # No reference solution found for this instance (see missing_file_path)
+                        print(f"No reference solution found for instance: {row['instance']}")
+                        df.loc[index, "solver_output_valid"] = False
+                        continue
+                    reference_solution = matching_reference.iloc[0]
                     df.loc[index, "solver_output_valid"] = (
                         row["solver_solution"] == reference_solution
                     )
                     # print(f"Instance: {row['instance']}, Solver Solution: {row['solver_solution']}, Reference Solution: {reference_solution}, Valid: {df.loc[index, 'solver_output_valid']}")
 
             return df
+    else:
+        raise ValueError(
+            f"Benchmark config for '{benchmark_name}' has no 'solution_path' entry; "
+            "cannot validate solver results without reference solutions."
+        )
 
 
 def load_solver_solutions(df: pd.DataFrame) -> pd.DataFrame:
@@ -142,11 +153,7 @@ class ValidateSolutionsAccaptanceTasks(Callback):
 
         # Clean the dataframe from rows with exit_with_error and timed_out
         combined_results_df_clean = clean_df(combined_results_df)
-        # # Filter df for DC and DS tasks
-        accaptance_df = combined_results_df_clean[
-            combined_results_df_clean["task"].str.contains("DC|DS")
-        ]
-
+        # Filter df for DC and DS tasks
         accaptance_df = filter_for_task(combined_results_df_clean, "DC|DS")
         validated_solutions_df = accaptance_df.groupby(
             ["benchmark_name", "task", "solver_name"]
@@ -217,96 +224,6 @@ from rich.panel import Panel
 from rich.text import Text
 
 console = Console()
-
-# def load_reference_solutions(
-#     directory: str,
-#     task: str,
-#     expected_instances=None,
-#     missing_file: str = "missing_instances.txt",
-# ) -> pd.DataFrame:
-#     """
-#     Reads all files in 'directory' that follow the naming convention:
-#         <anything>_<task>.sol
-#     For example, if task="DS-CO", it will match:
-#         BA_23423_234234_DS-CO.sol
-#     The part before "_<task>.sol" is treated as the 'instance' name.
-#     """
-
-#     # Display header panel
-#     console.print(Panel.fit(f"[bold blue]🔍 Loading Reference Solutions[/bold blue]", border_style="blue"))
-
-#     pattern = re.compile(rf"^(.+)_{re.escape(task)}\.sol$")
-#     if expected_instances is None:
-#         expected_instances = set()
-
-#     found_data = []
-#     found_instances = set()
-
-#     # Show directory and pattern being searched
-#     console.print(f"[bold cyan]📂 Searching in:[/bold cyan] {directory}")
-#     console.print(f"[bold cyan]🔎 File pattern:[/bold cyan] '(.+)_{task}.sol'")
-
-#     # Look through the directory
-#     for fname in os.listdir(directory):
-#         match = pattern.match(fname)
-#         if match:
-#             instance_name = match.group(1)
-#             file_path = os.path.join(directory, fname)
-
-#             with open(file_path, "r") as f:
-#                 content = f.read().strip()
-
-#             found_data.append({"instance": instance_name, "solution": content})
-#             found_instances.add(instance_name)
-
-#     # Print results
-#     console.print(f"[bold cyan]✅ Found solutions:[/bold cyan] {len(found_data)}")
-
-#     # Convert results to a DataFrame
-#     df = pd.DataFrame(found_data, columns=["instance", "solution"])
-
-#     # Check solutions are strictly YES or NO
-#     valid_solutions = check_solution_content_acceptance(df, task)
-#     valid_count = valid_solutions.sum()
-
-#     console.print(f"[bold green]✔ Valid solutions:[/bold green] {valid_count} / {len(valid_solutions)}")
-
-#     if not valid_solutions.empty and not valid_solutions.all():
-#         console.print("[bold red]⚠ WARNING:[/bold red] Some solutions are not 'YES' or 'NO':")
-
-#         # Create a table to show invalid entries
-#         invalid_table = Table(show_header=True, header_style="bold red")
-#         invalid_table.add_column("Instance", style="cyan", justify="left")
-#         invalid_table.add_column("Solution", style="red", justify="left")
-
-#         for _, row in df[~valid_solutions].iterrows():
-#             invalid_table.add_row(row["instance"], row["solution"])
-
-#         console.print(invalid_table)
-
-#     # Expected instance count
-#     console.print(f"[bold cyan]📌 Expected instances:[/bold cyan] {len(expected_instances)}")
-
-#     # Identify missing instances
-#     if expected_instances is not None and len(expected_instances) > 0:
-#         expected_set = set(os.path.splitext(os.path.basename(instance))[0] for instance in expected_instances)
-#         missing = sorted(expected_set - found_instances)
-
-#         if missing:
-#             console.print(f"[bold yellow]⚠ Missing instances:[/bold yellow] {len(missing)}")
-
-#             # Write missing instances to file
-#             with open(missing_file, "w") as fp:
-#                 for m in missing:
-#                     fp.write(m + "\n")
-
-#             console.print(f"[bold cyan]📝 Missing instances written to:[/bold cyan] {missing_file}")
-#         else:
-#             console.print("[bold green]✔ No missing instance files.[/bold green]")
-
-#     # Return the DataFrame
-#     return df
-
 
 def load_reference_solutions(
     directory: str,

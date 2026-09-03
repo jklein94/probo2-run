@@ -60,13 +60,3 @@ class AggregateResults(Callback):
 
         except Exception as e:
             console.print(f"[bold red]An error occurred: {e}[/bold red]")
-
-
-class AggregateResults2(Callback):
-    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
-        print("Second Callback")
-
-
-class AggregateResults3(Callback):
-    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
-        print("Third Callback")

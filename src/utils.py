@@ -9,7 +9,6 @@ from omegaconf import DictConfig, OmegaConf
 
 import csv
 import os
-import tabulate
 import pandas as pd
 import psutil
 
@@ -66,8 +65,37 @@ def solver_supports_task(solver_path: str, task: str) -> bool:
         print(f"Solver not found: {e}")
         return False
 
-def print_df_by_groups(df: pd.DataFrame, grouping,tablefmt='fancy_grid'):
-    df.groupby(grouping).apply(lambda _df: print(tabulate.tabulate(_df,headers='keys',tablefmt=tablefmt,showindex=False)))
+
+def task_allowed_for_solver(cfg: DictConfig, task: str) -> bool:
+    """
+    Checks whether the given task is allowed for the current solver according to the
+    optional `cfg.solver_task_mapping` config.
+
+    `solver_task_mapping` is an opt-in dict keyed by solver name (cfg.solver.name),
+    where each value is a list of task strings the solver is restricted to. A solver
+    name that is not present as a key in the mapping is unrestricted and runs on all
+    swept tasks (default, backward-compatible behavior). If `solver_task_mapping` is
+    absent or empty, every solver/task combination is allowed.
+
+    Args:
+        cfg (DictConfig): The full run configuration, optionally containing a
+            `solver_task_mapping` dict and always containing `cfg.solver.name`.
+        task (str): The task string to check (typically cfg.task).
+
+    Returns:
+        bool: True if the task is allowed for cfg.solver.name, False if the solver is
+              restricted via solver_task_mapping and this task is not in its allow-list.
+    """
+    mapping = cfg.get("solver_task_mapping", None)
+    if not mapping:
+        return True
+
+    solver_name = cfg.solver.name
+    if solver_name not in mapping:
+        return True
+
+    return task in mapping[solver_name]
+
 
 def write_result_to_csv(path, data_dict):
     """
@@ -98,32 +126,25 @@ def write_result_to_csv(path, data_dict):
 
 
 
-def get_index_mutable_interface_options(options: list) -> dict:
+def get_completed_result_paths(result_file_path: str) -> set:
     """
-    Creates a mapping from each option in the provided list to its index.
-
-    Given a list of options, this function creates and returns a dictionary where the keys are the options
-    from the list, and the values are the corresponding index positions of those options in the list.
+    Returns the set of `result_path` values that already have a row recorded in the
+    given results CSV, so a run can skip instances that were already completed
+    instead of appending a duplicate row for the same result_path.
 
     Args:
-        options (list): A list of options to be indexed.
+        result_file_path (str): Path to the solver's results.csv file.
 
     Returns:
-        dict: A dictionary where the keys are the options from the input list, and the values are their
-              respective indices in the list.
-
-    Example:
-        >>> get_index_mutable_interface_options(['a', 'b', 'c'])
-        {'a': 0, 'b': 1, 'c': 2}
-
-    Notes:
-        - The function assumes that the elements in `options` are hashable (can be used as dictionary keys).
-        - If the list contains duplicate values, only the index of the first occurrence will be stored.
+        set: The set of result_path values already present in the file (empty if the
+             file does not exist yet).
     """
-    option_to_index_map = {}
-    for option in options:
-        option_to_index_map[options] = options.index(option) + 1  # plus one to get the next index where the value is inserted
-    return option_to_index_map
+    if not os.path.isfile(result_file_path):
+        return set()
+
+    with open(result_file_path, "r", newline="", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        return {row["result_path"] for row in reader}
 
 
 def run_solver_with_timeout(command, timeout, output_file, time_flag=True,solver_path=None):
@@ -190,9 +211,11 @@ def run_solver_with_timeout(command, timeout, output_file, time_flag=True,solver
             file.write(stdout)
             #file.write('NO\nw 1 3 4')
 
-        # Set exit status and error code
-        result["exit_with_error"] = process.returncode != 0
-        result["error_code"] = process.returncode if process.returncode != 0 else None
+        # Set exit status and error code, unless a `time` output parsing failure
+        # above already flagged this result as an error
+        if not result["exit_with_error"]:
+            result["exit_with_error"] = process.returncode != 0
+            result["error_code"] = process.returncode if process.returncode != 0 else None
 
         # TODO: Set timeout when solver does not return 0 as return value
 
@@ -200,6 +223,11 @@ def run_solver_with_timeout(command, timeout, output_file, time_flag=True,solver
         result["timed_out"] = True
         result["user_sys_time"] = timeout
         result["perfcounter_time"] = timeout
+
+        # Ensure no stale output from a previous run at this path is left behind
+        with open(output_file, "w") as file:
+            file.write("")
+
         try:
             # Use psutil to get the parent process and all its children (recursively)
             parent = psutil.Process(process.pid)
@@ -229,12 +257,6 @@ def run_solver_with_timeout(command, timeout, output_file, time_flag=True,solver
         result["perfcounter_time"] = timeout
     return result
 
-
-def need_additional_arguments(task: str):
-    if "DC-" in task or "DS-" in task:
-        return True
-    else:
-        return False
 
 def get_solver_output_file_name(cfg: DictConfig) -> str:
     """
@@ -358,31 +380,6 @@ def get_unique_dir_name(base_path):
         if not os.path.exists(new_path):
             return new_path
         counter += 1
-
-
-def prepare_instances(cfg: DictConfig) -> List[str]:
-    """
-    Prepares a list of file paths based on the configuration provided in `cfg`.
-
-    This function retrieves files with a specific extension from a directory specified in the `cfg`.
-    The extension used for filtering is determined by the `solver.format` in `cfg`. If `solver.format`
-    is 'i23', it will use the `benchmark.format` as the file extension; otherwise, it uses `solver.format` directly.
-
-    Args:
-        cfg (DictConfig): Configuration object containing `solver` and `benchmark` attributes.
-                          Expected fields include:
-                          - `cfg.solver.format` (str): The format extension for the solver.
-                          - `cfg.benchmark.path` (str): The directory path for the benchmark files.
-                          - `cfg.benchmark.format` (str): The fallback format if `solver.format` is 'i23'.
-
-    Returns:
-        List[str]: A list of file paths matching the specified extension.
-    """
-    if cfg.solver.format == "i23":
-        return get_files_with_extension(cfg.benchmark.path,
-                                        cfg.benchmark.format)
-    else:
-        return get_files_with_extension(cfg.benchmark.path, cfg.solver.format)
 
 
 def get_files_with_extension(directory: str, extension: str) -> List[str]:
@@ -564,7 +561,7 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
     1) ICCMA23
        - SE task:
            • If there is a solution: a single line beginning with "_w" followed by space-separated integers
-             e.g. "w 1 2 4 5"
+             e.g. "_w 1 2 4 5"
            • If there is no solution: the single line "NO"
        - EE task:
            • Not specified in the question. You may adapt to your needs.
@@ -591,9 +588,12 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
     if interface.lower() == "legacy":
         # Legacy interface checks
         if "SE-" in task:
-            # Expect something like "[...]" or possibly "[]" if empty
-            # Minimal check: must start with "[" and end with "]"
-            if not (output.startswith("[") and output.endswith("]")):
+            # Expect something like "[...]" or possibly "[]" if empty; "NO" is also valid
+            if output == "NO":
+                is_valid = True
+            elif output.startswith("[") and output.endswith("]"):
+                is_valid = True
+            else:
                 is_valid = False
 
         elif "EE-" in task:
@@ -613,25 +613,28 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
     elif interface.lower() == "i23":
         # ICCMA23 checks
         if "SE-" in task:
-            # "NO" if no solution, or "w " followed by integers if there is a solution
-            if output == "NO":
+            normalized_output = output.strip()
+
+            # "NO" if no solution
+            if normalized_output == "NO":
                 is_valid = True
-            elif output.startswith("w "):
-                # Check the parts after splitting on whitespace
-                parts = output.split()
-                if parts[0] != "w":
+            else:
+                parts = normalized_output.split()
+
+                # Accept:
+                #   w          -> empty extension
+                #   w 1 2 3    -> extension containing integers
+                if not parts or parts[0] != "w":
                     is_valid = False
                 else:
-                    # Ensure all subsequent parts are valid integers
-                    for p in parts[1:]:
-                        try:
-                            int(p)
-                        except ValueError:
-                            is_valid = False
-                            break
-            else:
-                # Not matching "NO" or "w N1 N2..."
-                is_valid = False
+                    try:
+                        # For an empty extension, parts[1:] is empty and valid.
+                        for part in parts[1:]:
+                            int(part)
+
+                        is_valid = True
+                    except ValueError:
+                        is_valid = False
 
         elif  "EE-" in task:
             # Not specified in the problem description for ICCMA23
@@ -730,38 +733,6 @@ def dump_configs(cfg):
         OmegaConf.save(config=cfg.benchmark, f=benchmark_config_file_path)
         print(f"Benchmark config saved to {benchmark_config_file_path}")
 
-# def create_callback_chain(callback_dict: dict, current_callback: str) -> str:
-#     """
-#     Takes a dictionary of callbacks and the name of the 'current' callback,
-#     and returns a visually formatted string of callback names in reverse
-#     order. If the current_callback is found in the dict, its name is
-#     displayed in bold red; otherwise, no highlighting is applied.
-#     """
-#     # 1. Reverse the dictionary keys
-#     reversed_keys = list(callback_dict.keys())[::-1]
-
-#     # 2. Prepare the highlighted names
-#     highlighted_names = []
-#     for key in reversed_keys:
-#         if key == current_callback and key in callback_dict:
-#             # Highlight current callback in bold red
-#             highlighted_names.append(f"\033[1;32m{key}\033[0m")
-#         else:
-#             highlighted_names.append(f"\033[90m{key}\033[0m")
-
-#     # 3. Join them with an arrow
-#     chain_str = " -> ".join(highlighted_names)
-
-#     # 4. Build a visually pleasing output with a header and footer
-#     #    (here using ANSI escape codes for blue + bold lines)
-#     header = "\033[1;34m==================== Evaluation Pipeline ====================\033[0m"
-#     footer = f"\033[1;34m+ Now running \033[1;32m{current_callback}\033[0m \033[0m\n"
-
-#     # 5. Put it all together
-#     formatted_output = f"\n{header}\n{chain_str}\n\n{footer}"
-#     return formatted_output
-
-
 from rich.console import Console
 from rich.text import Text
 from rich.panel import Panel
@@ -812,48 +783,6 @@ def create_callback_chain(callback_dict: dict, current_callback: str) -> None:
     console.print(footer)
     console.print("")
 
-
-from rich.text import Text
-# def create_callback_chain(callback_dict: dict, current_callback: str) -> str:
-#     """
-#     Takes a dictionary of callbacks and the name of the 'current' callback,
-#     and returns a visually formatted string of callback names in reverse
-#     order. The current callback is highlighted in bold green.
-#     """
-
-
-#     # Reverse the dictionary keys
-#     reversed_keys = list(callback_dict.keys())[::-1]
-#     index_current_callback = reversed_keys.index(current_callback)
-#     index_next_callback = index_current_callback + 1
-#     # Build the chain representation
-#     # highlighted_names = []
-#     # for key in enumerate(reversed_keys):
-#     #     if key == current_callback and key in callback_dict:
-#     #         highlighted_names.append(f"[bold green]{key}[/bold green]")  # Highlight current
-#     #         highlighted_names.append(f"[dim]{key}[/dim]")  # Dim for others
-
-#     # Join callbacks with arrows
-#     #chain_str = " [bold cyan]→[/bold cyan] ".join(highlighted_names)
-
-#     # Build the header and footer
-#     # header = Panel.fit(
-#     # "[bold blue]Evaluation Pipeline[/bold blue]",
-#     # border_style="blue"
-#     # )
-#     footer_highlighted = Panel.fit(
-#     f"[bold green]{current_callback}[/bold green] [dim]→ {reversed_keys[index_next_callback]}[/dim]",
-#     border_style="green"
-#     )
-#     #footer = f"[bold blue] + Now running:[/bold blue]"
-#     next_callback = f"[dim]→{reversed_keys[index_next_callback]}[/dim]"
-
-#     # Combine everything
-#     #console.print(header)
-#     #console.print(chain_str)
-#     console.print( "[bold green]{Evaluation Pipeline}[/bold green]",end='')
-#     console.print(footer_highlighted,end='')
-#     #console.print(next_callback)
 
 from rich.table import Table
 def print_dataframe_as_rich_table(df: pd.DataFrame, title: str = "DataFrame") -> None:

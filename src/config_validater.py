@@ -1,10 +1,8 @@
 from omegaconf import DictConfig
 from pathlib import Path
 from typing import Tuple, Dict, List
-from src import utils
 from src import solver_interfaces
 
-from hydra.core.hydra_config import HydraConfig
 import os
 
 
@@ -47,23 +45,7 @@ def validate_config(cfg: DictConfig):
             f"{GREEN}✔ Solver and benchmark format match ({cfg.solver.format}){RESET}"
         )
 
-    # # Check if the experiment root directory already exists, if so add a number as suffix
-    # experiment_root_exists(cfg)
-
     return all(all_validation_results)
-
-def experiment_root_exists(cfg: DictConfig) -> bool:
-
-    hydra_cfg = HydraConfig.get()
-    run_dir = hydra_cfg.runtime.output_dir
-    # Get parent directory
-    root_dir = os.path.dirname(run_dir)
-
-    if os.path.exists(root_dir):
-        root_dir = utils.get_unique_dir_name(root_dir)
-
-
-    print(root_dir)
 
 
 def check_solver_config(config) -> Tuple[dict, bool]:
