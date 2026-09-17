@@ -1,5 +1,5 @@
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from src import solver_interfaces
 from src import utils, config_validater
 from hydra.core.utils import JobReturn
@@ -38,8 +38,7 @@ def run_solver_static_accaptance(cfg: DictConfig) -> None:
     2. Dumps the current configuration to a file.
     3. Determines the matching format between solver and benchmark.
     4. Retrieves instances and query argument instances based on the benchmark path and formats.
-    5. Generates and saves a mapping from instance names to query arguments.
-    6. Loads the instance-to-query-argument mapping from a file.
+    5. Builds an in-memory mapping from instance names to query arguments.
     7. Constructs the solver interface command based on the configuration.
     8. Adjusts the solver command to include the instance file and query arguments.
     9. Runs the solver for each instance with a timeout and captures the output.
@@ -72,16 +71,14 @@ def run_solver_static_accaptance(cfg: DictConfig) -> None:
     )
 
     # Generate mapping from the instances name (without extension) to the query argument
-    # Save mapping to file if not present
-    mapping_file_path = os.path.join(
-        run_dir, f"{cfg.benchmark.name}_query_arg_mapping.yaml"
-    )
-
-    utils.save_instance_to_query_arg_mapping(
-        instances, query_argument_instances, cfg, mapping_file_path
-    )
-    # Load mapping file
-    instance_to_query_arg_mapping = OmegaConf.load(mapping_file_path)
+    try:
+        instance_to_query_arg_mapping = utils.generate_instance_to_query_arg_mapping(
+            instances, query_argument_instances, cfg.benchmark.query_arg_format
+        )
+    except ValueError as e:
+        print(e)
+        print("Please make sure the query argument files are present for all instances.")
+        return None
 
     solver_interface_command = solver_interfaces.interfaces_dict[cfg.solver.interface](
         cfg
@@ -140,6 +137,7 @@ def run_solver_static_accaptance(cfg: DictConfig) -> None:
             cfg.timeout,
             current_output_file_path,
             solver_path=cfg.solver.path,
+            memory_limit_mb=cfg.solver_memory_limit_mb,
         )
 
         # Validate solver output
@@ -266,6 +264,7 @@ def run_solver_static_enumeration(cfg: DictConfig) -> None:
             cfg.timeout,
             current_output_file_path,
             solver_path=cfg.solver.path,
+            memory_limit_mb=cfg.solver_memory_limit_mb,
         )
 
         # Validate solver output

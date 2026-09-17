@@ -5,6 +5,7 @@ import subprocess
 import time
 import os
 import signal
+import resource
 from omegaconf import DictConfig, OmegaConf
 
 import csv
@@ -147,7 +148,19 @@ def get_completed_result_paths(result_file_path: str) -> set:
         return {row["result_path"] for row in reader}
 
 
-def run_solver_with_timeout(command, timeout, output_file, time_flag=True,solver_path=None):
+def _preexec_with_memory_limit(memory_limit_mb):
+    """Build a preexec_fn that starts a new session and, if given, caps the
+    child's virtual address space (RLIMIT_AS) so an over-allocating solver
+    fails on its own instead of triggering the system/cgroup OOM killer."""
+    def _apply():
+        os.setsid()  # Start in a new process group (Linux/macOS)
+        if memory_limit_mb is not None:
+            limit_bytes = int(memory_limit_mb) * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+    return _apply
+
+
+def run_solver_with_timeout(command, timeout, output_file, time_flag=True, solver_path=None, memory_limit_mb=None):
 
     if solver_path is None:
         solver_path = os.getcwd()
@@ -176,7 +189,7 @@ def run_solver_with_timeout(command, timeout, output_file, time_flag=True,solver
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            preexec_fn=os.setsid,  # Start in a new process group (Linux/macOS)
+            preexec_fn=_preexec_with_memory_limit(memory_limit_mb),
             cwd=solver_path
         )
         # Wait for the process to complete or timeout
@@ -400,34 +413,6 @@ def get_files_with_extension(directory: str, extension: str) -> List[str]:
         str(file) for file in Path(directory).rglob(f"*.{extension}")
         if file.is_file()
     ]
-
-
-def save_instance_to_query_arg_mapping(instances: List[str], query_argument_instances: List[str], cfg: DictConfig, mapping_file_path: str) -> None:
-        """
-        Generates and saves a mapping from instance names to query argument contents if the mapping file does not already exist.
-
-        Args:
-            instances (List[str]): List of file paths to instance files.
-            query_argument_instances (List[str]): List of file paths to query argument instance files.
-            cfg (DictConfig): Configuration object containing benchmark attributes.
-            mapping_file_path (str): Path to save the mapping file.
-
-        Returns:
-            None
-        """
-        if not os.path.exists(mapping_file_path):
-            try:
-                instance_to_query_arg_mapping = generate_instance_to_query_arg_mapping(
-                    instances, query_argument_instances, cfg.benchmark.query_arg_format)
-            except ValueError as e:
-                print(e)
-                print("Please make sure the query argument files are present for all instances.")
-                return None
-
-            with open(mapping_file_path, 'w') as f:
-                f.write(OmegaConf.to_yaml(instance_to_query_arg_mapping))
-        else:
-            print(f"Mapping file already exists at {mapping_file_path}.")
 
 
 def strip_extension(filename: str, extension: str) -> str:

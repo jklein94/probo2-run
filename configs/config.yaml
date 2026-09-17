@@ -33,6 +33,7 @@ configs_output_dir: ${root_dir}/configs
 
 task: ???     # Default task
 timeout: 600
+solver_memory_limit_mb: null  # Optional: hard memory limit (RLIMIT_AS) per solver process in MB. null = no limit.
 runs: 1
 name: MyExperiment
 check_solver_output: False # Check if the solver output follows the expected format of the corresponding interface and task
