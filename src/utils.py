@@ -6,7 +6,9 @@ import time
 import os
 import signal
 import resource
+import fcntl
 from omegaconf import DictConfig, OmegaConf
+from hydra.core.hydra_config import HydraConfig
 
 import csv
 import os
@@ -67,16 +69,69 @@ def solver_supports_task(solver_path: str, task: str) -> bool:
         return False
 
 
+def _as_str_list(value) -> list:
+    """
+    Normalizes a task/benchmark specification to a list of stripped strings.
+    Accepts a single string (optionally comma separated, e.g. "SE-PR, SE-CO") or a list.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    result = []
+    for v in value:
+        result.extend(_as_str_list(v))
+    return result
+
+
+def _current_benchmark_identifiers(cfg: DictConfig) -> set:
+    """
+    Returns all identifiers the current benchmark can be referred to in
+    `solver_task_mapping`: its `name` field (e.g. ICCMA25_legacy) and the Hydra
+    config-group choice (e.g. I25_legacy or /I25_legacy), if available.
+    """
+    identifiers = {str(cfg.benchmark.name)}
+    try:
+        choice = HydraConfig.get().runtime.choices.get("benchmark")
+        if choice:
+            identifiers.add(str(choice))
+            identifiers.add(str(choice).lstrip("/"))
+    except Exception:
+        # HydraConfig not initialized (e.g. when called outside of a Hydra run)
+        pass
+    return identifiers
+
+
 def task_allowed_for_solver(cfg: DictConfig, task: str) -> bool:
     """
-    Checks whether the given task is allowed for the current solver according to the
-    optional `cfg.solver_task_mapping` config.
+    Checks whether the given task is allowed for the current solver (and benchmark)
+    according to the optional `cfg.solver_task_mapping` config.
 
-    `solver_task_mapping` is an opt-in dict keyed by solver name (cfg.solver.name),
-    where each value is a list of task strings the solver is restricted to. A solver
-    name that is not present as a key in the mapping is unrestricted and runs on all
-    swept tasks (default, backward-compatible behavior). If `solver_task_mapping` is
-    absent or empty, every solver/task combination is allowed.
+    `solver_task_mapping` is an opt-in dict keyed by solver name (cfg.solver.name).
+    Two value formats are supported per solver:
+
+    1. A list of task strings - the solver is restricted to these tasks on every
+       swept benchmark (original behavior):
+
+           solver_task_mapping:
+             fudge_23: [SE-PR, SE-CO]
+
+    2. A list of benchmark entries - the solver only runs the listed tasks on the
+       listed benchmark; benchmarks not listed are skipped entirely for this solver:
+
+           solver_task_mapping:
+             fudge_23:
+               - benchmark: I23_apx_tgf      # config-group name or benchmark `name`
+                 tasks: [SE-PR, SE-CO]       # `task` is accepted as alias
+               - benchmark: I25_legacy
+                 tasks: DC-CO, DS-CO         # comma separated string also works
+
+       `benchmark` may also be a list of benchmarks. An entry without `tasks`
+       allows all swept tasks on that benchmark.
+
+    A solver name that is not present as a key in the mapping is unrestricted and
+    runs on all swept benchmark/task combinations. If `solver_task_mapping` is
+    absent or empty, every combination is allowed.
 
     Args:
         cfg (DictConfig): The full run configuration, optionally containing a
@@ -84,8 +139,8 @@ def task_allowed_for_solver(cfg: DictConfig, task: str) -> bool:
         task (str): The task string to check (typically cfg.task).
 
     Returns:
-        bool: True if the task is allowed for cfg.solver.name, False if the solver is
-              restricted via solver_task_mapping and this task is not in its allow-list.
+        bool: True if the combination of cfg.solver.name, the current benchmark and
+              task is allowed, False otherwise.
     """
     mapping = cfg.get("solver_task_mapping", None)
     if not mapping:
@@ -95,7 +150,80 @@ def task_allowed_for_solver(cfg: DictConfig, task: str) -> bool:
     if solver_name not in mapping:
         return True
 
-    return task in mapping[solver_name]
+    spec = mapping[solver_name]
+    if spec is None:
+        return True
+    if isinstance(spec, str):
+        return task in _as_str_list(spec)
+
+    entries = list(spec)
+    if not any(isinstance(e, (dict, DictConfig)) for e in entries):
+        # Format 1: plain list of tasks
+        return task in _as_str_list(entries)
+
+    # Format 2: list of {benchmark, tasks} entries
+    benchmark_ids = _current_benchmark_identifiers(cfg)
+    for entry in entries:
+        if not isinstance(entry, (dict, DictConfig)):
+            raise ValueError(
+                f"solver_task_mapping['{solver_name}']: mixing plain tasks and benchmark "
+                f"entries is not supported (got {entry!r})."
+            )
+        if "benchmark" not in entry:
+            raise ValueError(
+                f"solver_task_mapping['{solver_name}']: entry {dict(entry)} has no 'benchmark' key."
+            )
+        entry_benchmarks = {b.lstrip("/") for b in _as_str_list(entry["benchmark"])}
+        if not entry_benchmarks & {b.lstrip("/") for b in benchmark_ids}:
+            continue
+        tasks = entry.get("tasks", entry.get("task", None))
+        if tasks is None:
+            return True
+        if task in _as_str_list(tasks):
+            return True
+    return False
+
+
+def record_skipped_combination(cfg: DictConfig, reason: str = "solver_task_mapping") -> str:
+    """
+    Appends the current (solver, benchmark, task) combination to
+    `cfg.skipped_combinations_file`, so intentionally skipped combinations can be
+    distinguished from missing results (e.g. crashed jobs) after the experiment.
+
+    The file is shared by all jobs of a sweep, so writes are serialized with an
+    exclusive file lock (safe for parallel launchers such as joblib).
+
+    Returns:
+        str: The path of the skipped-combinations file.
+    """
+    path = cfg.skipped_combinations_file
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        benchmark_config = HydraConfig.get().runtime.choices.get("benchmark")
+    except Exception:
+        benchmark_config = None
+    row = {
+        "experiment_name": cfg.name,
+        "solver_name": cfg.solver.name,
+        "solver_version": cfg.solver.get("version", None),
+        "benchmark_name": cfg.benchmark.name,
+        "benchmark_config": benchmark_config,
+        "task": cfg.task,
+        "run": cfg.runs,
+        "reason": reason,
+    }
+    with open(path, "a", newline="", encoding="utf-8") as csvfile:
+        fcntl.flock(csvfile, fcntl.LOCK_EX)
+        try:
+            writer = csv.DictWriter(csvfile, fieldnames=row.keys())
+            # Decide on the header while holding the lock to avoid duplicate headers
+            if os.fstat(csvfile.fileno()).st_size == 0:
+                writer.writeheader()
+            writer.writerow(row)
+            csvfile.flush()
+        finally:
+            fcntl.flock(csvfile, fcntl.LOCK_UN)
+    return path
 
 
 def write_result_to_csv(path, data_dict):

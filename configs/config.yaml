@@ -14,6 +14,8 @@ defaults:
 root_dir: results/${name}_${now:%Y-%m-%d_%H-%M-%S}
 result_index_file:  ${root_dir}/result_file_index.txt
 combined_results_file:  ${root_dir}/combined_results.csv
+skipped_combinations_file: ${root_dir}/skipped_combinations.csv # (solver, benchmark, task) combinations skipped via solver_task_mapping
+running_updates_dir: ${root_dir}/running_updates # Per (benchmark, task) tables, updated as soon as a job finishes
 
 evaluation_output_dir: ${root_dir}/evaluation
 statistics_output_dir: ${evaluation_output_dir}/statistics
@@ -38,8 +40,9 @@ runs: 1
 name: MyExperiment
 check_solver_output: False # Check if the solver output follows the expected format of the corresponding interface and task
 update_solver_output_valid_flag: False # If true the "solver_output_valid" flag in combined_results.csv will be updated with the validation results
+running_updates: True # Evaluate each job right after it finishes and update the tables in running_updates_dir
 run_subset: False # Option to run just a subset of the Benchmark, if a integer n, run the n first instanes; if a path, run all (unique) instances in the file
-solver_task_mapping: {} # Optional: restrict specific solvers (by cfg.solver.name) to a subset of swept tasks, e.g. {pyglaf: [SE-CO, SE-ST]}. Solvers not listed as keys are unrestricted.
+solver_task_mapping: {} # Optional: restrict solvers (by cfg.solver.name) to tasks, optionally per benchmark. E.g. {pyglaf: [SE-CO, SE-ST]} or {pyglaf: [{benchmark: I23_apx_tgf, tasks: [SE-PR]}, {benchmark: I25_legacy, tasks: [DC-CO]}]}. Unlisted solvers are unrestricted.
 
 hydra:
   sweep:

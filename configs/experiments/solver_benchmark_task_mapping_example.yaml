@@ -1,0 +1,44 @@
+# @package _global_
+#
+# Example experiment demonstrating `solver_task_mapping` with per-benchmark task lists.
+#
+# Instead of a plain task list, a solver can be given a list of {benchmark, tasks}
+# entries. The solver then only runs the listed tasks on the listed benchmark and
+# skips every other benchmark of the sweep:
+#
+#   fudge_I21:     SE-PR, SE-CO on I23_apx_tgf  |  DC-CO, DS-CO on I25_legacy  |  nothing on I21
+#   mu-toksia_I21: SE-CO on every swept benchmark (plain list = old format, still supported)
+#
+# The sweep below has 3 benchmarks x 2 solvers x 4 tasks = 24 combinations; only the
+# 7 allowed ones are executed, the rest are skipped at runtime with a console message.
+#
+# Notes:
+#   - Keys are solver `name` fields (fudge.yaml -> name: fudge_I21), not config paths.
+#   - `benchmark` can be the config-group name (I25_legacy) or the benchmark's `name`
+#     field (ICCMA25_legacy); it may also be a list of benchmarks.
+#   - `tasks` (alias: `task`) may be a list or a comma separated string. An entry
+#     without `tasks` allows all swept tasks on that benchmark.
+#   - The `task:` sweep must contain the union of all tasks used in the mapping.
+
+name: Solver-Benchmark-Task-Mapping-Example
+
+defaults:
+  - override /callbacks:
+    - general/aggregate_solver_results
+
+timeout: 600
+
+solver_task_mapping:
+  fudge_I21:
+    - benchmark: I23_apx_tgf
+      tasks: [SE-PR, SE-CO]
+    - benchmark: I25_legacy
+      tasks: DC-CO, DS-CO
+  mu-toksia_I21: [SE-CO]
+
+hydra:
+  sweeper:
+    params:
+      benchmark: I23_apx_tgf, I25_legacy, I21
+      solver: /I21/fudge, /I21/mu-toksia
+      task: SE-PR, SE-CO, DC-CO, DS-CO

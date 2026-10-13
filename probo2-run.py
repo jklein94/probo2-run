@@ -1,7 +1,7 @@
 import hydra
 from omegaconf import DictConfig
 from src import solver_interfaces
-from src import utils, config_validater
+from src import utils, config_validater, running_updates
 from hydra.core.utils import JobReturn
 from typing import Any, List
 from hydra.experimental.callback import Callback
@@ -308,6 +308,14 @@ def run_experiment(cfg: DictConfig) -> None:
     if isinstance(cfg.benchmark.format, str):
         cfg.benchmark.format = [cfg.benchmark.format]  # Wrap single string in a list
 
+    # Skip solver/benchmark/task combinations excluded via solver_task_mapping
+    if not utils.task_allowed_for_solver(cfg, cfg.task):
+        print("\n" + "-"*60)
+        print(f"Skipping: task '{cfg.task}' on benchmark '{cfg.benchmark.name}' is not allowed for solver '{cfg.solver.name}' (solver_task_mapping).")
+        utils.record_skipped_combination(cfg)
+        print("-"*60 + "\n")
+        return
+
     if cfg.config_validation.validate_config:
         # check if the root directory
 
@@ -322,12 +330,6 @@ def run_experiment(cfg: DictConfig) -> None:
     # Run experiment based on task or config
     # Check if the cfg.task string contains the prefix SE or EE
 
-    if not utils.task_allowed_for_solver(cfg, cfg.task):
-        print("\n" + "-"*60)
-        print(f"Skipping: task '{cfg.task}' is not in the allowed task list for solver '{cfg.solver.name}' (solver_task_mapping).")
-        print("-"*60 + "\n")
-        return
-
     if utils.solver_supports_task(cfg.solver.path, cfg.task):
 
         if cfg.task.startswith("SE") or cfg.task.startswith("EE"):
@@ -335,6 +337,13 @@ def run_experiment(cfg: DictConfig) -> None:
         # Check if the cfg.task string contains the prefix DC or DS
         elif cfg.task.startswith("DC") or cfg.task.startswith("DS"):
             run_solver_static_accaptance(cfg)
+
+        # Evaluate this job right away and update the running (benchmark, task) table
+        if cfg.get("running_updates", False):
+            try:
+                running_updates.update_running_tables(cfg)
+            except Exception as e:
+                print(f"Running update failed for {cfg.solver.name} on {cfg.benchmark.name}/{cfg.task}: {e}")
     else:
         print("\n" + "="*60)
         print(f"⚠️  WARNING: Solver '{cfg.solver.path}' does NOT support task '{cfg.task}'.")

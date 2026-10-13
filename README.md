@@ -136,5 +136,26 @@ solver_task_mapping:
 
 Solvers not listed as a key are unaffected and continue to run on all swept tasks. Excluded combinations are skipped at runtime with a console message — no result row or `.out` file is produced for them.
 
+To restrict tasks **per benchmark**, give the solver a list of `benchmark`/`tasks` entries instead. The solver then runs only the listed tasks on each listed benchmark and skips all other swept benchmarks:
+
+```yaml
+solver_task_mapping:
+  fudge_I21:
+    - benchmark: I23_apx_tgf      # config-group name or the benchmark's `name` field
+      tasks: [SE-PR, SE-CO]
+    - benchmark: I25_legacy
+      tasks: DC-CO, DS-CO         # comma separated string also works; `task` is accepted as alias
+```
+
+`benchmark` may also be a list; an entry without `tasks` allows all swept tasks on that benchmark. Benchmarks, solvers and tasks used in the mapping must still be part of the `hydra.sweeper.params` sweep. See `configs/experiments/solver_benchmark_task_mapping_example.yaml`.
+
+Every skipped combination is recorded in `<root_dir>/skipped_combinations.csv` (solver, benchmark, task, reason), so intentionally skipped combinations can be told apart from missing results (e.g. crashed jobs). The evaluation callbacks only see combinations that actually ran: skipped ones do not appear in the statistics, tables or plots (they are not counted as unsolved).
+
+#### Running updates (live results per benchmark and task)
+
+You don't have to wait for the end of the sweep to see results. As soon as a job (solver x benchmark x task) has finished, it is evaluated and its row is inserted into `<root_dir>/running_updates/<benchmark_name>_<task>.csv` (plus a pretty-printed `.txt` version). Each table holds one row per finished solver with `instances`, `solved`, `timeouts`, `errors`, `invalid`, `coverage`, mean runtimes, `PAR_2`, `PAR_10` and `last_update`, sorted by solved (desc) and PAR2 (asc). The numbers use the same definitions as the final evaluation callbacks. Re-running a job replaces its row; parallel launchers (joblib) are supported via file locking.
+
+The feature is enabled by default and can be turned off per experiment with `running_updates: False`. The output directory is configured via `running_updates_dir`.
+
 
 
