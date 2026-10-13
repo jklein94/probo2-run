@@ -1,0 +1,44 @@
+# @package _global_
+#
+# Example experiment demonstrating `solver_task_mapping`.
+#
+# Two solvers are swept together, but each is restricted to its own subset of tasks
+# instead of running on the full Cartesian product of solver x task combinations:
+#
+#   ConArg (I21, configs/solver/I21/conarg.yaml): SE-CO, DS-CO, SE-ID, DC-ID
+#   Yonas  (I19, configs/solver/I19/yonas.yaml):  SE-CO, DS-CO, SE-GR, DC-GR
+#
+# The `task:` sweep below lists the UNION of both solvers' tasks (6 unique tasks).
+# Without solver_task_mapping, both solvers would run on all 6 tasks (2 x 6 = 12 jobs).
+# With the mapping below, each solver only runs on its own 4 listed tasks (8 jobs);
+# the remaining 4 (solver, task) combinations are skipped at runtime with a console
+# message and produce no result row / .out file.
+
+name: ConArg-Yonas-Solver-Task-Mapping-Example
+
+defaults:
+  - override /callbacks:
+    - tables/plain_text
+    - stats/aggregate_results
+    - stats/solved
+    - stats/coverage
+    - stats/errors
+    - stats/timeouts
+    - general/aggregate_solver_results
+
+timeout: 600
+
+# Restrict each solver to its own subset of tasks. Keyed by the solver's `name` field
+# (conarg.yaml -> name: conarg_I21, yonas.yaml -> name: yonas_I19) - NOT the config-group
+# path used below under hydra.sweeper.params.solver (/I21/conarg, /I19/yonas).
+# Any solver not listed here would run unrestricted on all swept tasks.
+solver_task_mapping:
+  conarg_I21: [SE-CO, DS-CO, SE-ID, DC-ID]
+  yonas_I19: [SE-CO, DS-CO, SE-GR, DC-GR]
+
+hydra:
+  sweeper:
+    params:
+      benchmark: I21 # supports both apx (ConArg) and tgf (Yonas), see configs/benchmark/I21.yaml
+      solver: /I21/conarg, /I19/yonas
+      task: SE-CO, DS-CO, SE-ID, DC-ID, SE-GR, DC-GR

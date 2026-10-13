@@ -695,17 +695,30 @@ def is_valid_solver_output_enumeration_task(interface: str, task: str, solver_ou
         solver_output = f.read()
     # Clean up any leading/trailing whitespace
     output = solver_output.strip()
+    # Some solvers append extra informational lines after the actual solution
+    # (e.g. conarg writes "[...]\n1 solution(s) found"). Only the first
+    # non-empty line carries the actual answer, so validate against that.
+    first_line = next((l.strip() for l in output.splitlines() if l.strip()), "")
     is_valid = True
 
     # Normalize the interface string for comparison
     if interface.lower() == "legacy":
         # Legacy interface checks
         if "SE-" in task:
-            # Expect something like "[...]" or possibly "[]" if empty; "NO" is also valid
-            if output == "NO":
+            # Expect something like "[...]" or possibly "[]" if empty; "NO" is also valid.
+            # Some solvers emit the ICCMA23-style "w ..." extension format even when run
+            # under the legacy interface, so that is accepted as an equivalent encoding.
+            if first_line == "NO":
                 is_valid = True
-            elif output.startswith("[") and output.endswith("]"):
+            elif first_line.startswith("[") and first_line.endswith("]"):
                 is_valid = True
+            elif first_line.split() and first_line.split()[0] == "w":
+                try:
+                    for part in first_line.split()[1:]:
+                        int(part)
+                    is_valid = True
+                except ValueError:
+                    is_valid = False
             else:
                 is_valid = False
 
