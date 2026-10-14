@@ -304,6 +304,12 @@ def run_experiment(cfg: DictConfig) -> None:
     # Generate custom directories
     os.makedirs(cfg.evaluation_output_dir, exist_ok=True)
 
+    # Remember this experiment as the current one (default target of progress.py)
+    try:
+        utils.record_current_experiment()
+    except Exception as e:
+        print(f"Could not record current experiment: {e}")
+
     # Change the format string to a list
     if isinstance(cfg.benchmark.format, str):
         cfg.benchmark.format = [cfg.benchmark.format]  # Wrap single string in a list

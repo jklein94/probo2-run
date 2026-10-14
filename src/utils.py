@@ -184,6 +184,40 @@ def task_allowed_for_solver(cfg: DictConfig, task: str) -> bool:
     return False
 
 
+# Pointer to the experiment that was started last; progress.py shows it when called without a path
+CURRENT_EXPERIMENT_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results", ".current_experiment"
+)
+
+
+def record_current_experiment() -> str:
+    """
+    Writes the absolute result directory of the running sweep to CURRENT_EXPERIMENT_FILE.
+
+    The directory is derived from the job's actual Hydra output dir
+    (<root_dir>/solver_results/<solver>), not from cfg.root_dir, whose ${now:...}
+    could resolve differently in separate launcher processes. Every job of a sweep
+    writes the same path, so the file is only rewritten when it changes, and the
+    write is atomic (temporary file + rename) so readers never see a partial path.
+
+    Returns:
+        str: The recorded experiment directory.
+    """
+    experiment_dir = os.path.dirname(os.path.dirname(os.path.abspath(HydraConfig.get().runtime.output_dir)))
+    try:
+        with open(CURRENT_EXPERIMENT_FILE, encoding="utf-8") as f:
+            if f.read().strip() == experiment_dir:
+                return experiment_dir
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(CURRENT_EXPERIMENT_FILE), exist_ok=True)
+    tmp_path = f"{CURRENT_EXPERIMENT_FILE}.{os.getpid()}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(experiment_dir + "\n")
+    os.replace(tmp_path, CURRENT_EXPERIMENT_FILE)
+    return experiment_dir
+
+
 def record_skipped_combination(cfg: DictConfig, reason: str = "solver_task_mapping") -> str:
     """
     Appends the current (solver, benchmark, task) combination to
